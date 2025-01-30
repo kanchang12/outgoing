@@ -1,6 +1,5 @@
 from flask import Flask, render_template, request, jsonify
-from twilio.rest import Client
-from twilio.twiml.voice_response import VoiceResponse, Gather, Say
+from signalwire.rest import Client as SignalWireClient
 from openai import OpenAI
 from flask_socketio import SocketIO
 import PyPDF2
@@ -14,7 +13,9 @@ socketio = SocketIO(app)
 
 # Initialize clients
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+signalwire_client = SignalWireClient(os.getenv("SIGNALWIRE_PROJECT_ID"), 
+                                     os.getenv("SIGNALWIRE_API_TOKEN"), 
+                                     signalwire_space_url=os.getenv("SIGNALWIRE_SPACE_URL"))
 
 def extract_text_from_pdf(pdf_path):
     """Extract text from PDF file"""
@@ -38,13 +39,8 @@ def parse_resume(pdf_text):
     }
 
 # Read and parse PDF at startup
-# Direct path to PDF (assuming it's in the same folder as main.py)
 PDF_PATH = "Profile.pdf"
-
-# Extract text from the PDF
 pdf_text = extract_text_from_pdf(PDF_PATH)
-
-# Parse the resume content
 parsed_resume = parse_resume(pdf_text)
 
 SYSTEM_PROMPT = f"""
@@ -112,7 +108,7 @@ def get_ai_response(context, employer_response):
 
 @app.route('/call', methods=['POST'])
 def initiate_call():
-    """Initiate a call with recording"""
+    """Initiate a call with recording using SignalWire"""
     try:
         phone_number = request.json['phone_number']
         initial_message = (
@@ -121,12 +117,11 @@ def initiate_call():
             "Would you have a moment to discuss their qualifications?"
         )
         
-        call = twilio_client.calls.create(
-            url="https://evident-orly-onewebonly-4acd77ba.koyeb.app/handle_call",  # Your Koyeb URL
+        call = signalwire_client.calls.create(
+            url="https://your-koyeb-app.koyeb.app/handle_call",  # Your Koyeb URL
             to=phone_number,
             from_="+18452864551",
-            record=True,
-            recording_status_callback=f"https://evident-orly-onewebonly-4acd77ba.koyeb.app/recording-status"
+            record=True
         )
         
         call_state.conversations[call.sid] = {
@@ -190,7 +185,7 @@ def end_call():
     """End the call and save recording"""
     try:
         call_sid = request.json['call_sid']
-        call = twilio_client.calls(call_sid).update(status="completed")
+        call = signalwire_client.calls(call_sid).update(status="completed")
         return jsonify({"status": "success"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
