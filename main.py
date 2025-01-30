@@ -122,11 +122,11 @@ def initiate_call():
         )
         
         call = twilio_client.calls.create(
-            url=f"{request.host_url}handle_call",
+            url="https://evident-orly-onewebonly-4acd77ba.koyeb.app/handle_call",  # Your Koyeb URL
             to=phone_number,
             from_="+18452864551",
             record=True,
-            recording_status_callback=f"{request.host_url}recording-status"
+            recording_status_callback=f"https://evident-orly-onewebonly-4acd77ba.koyeb.app/recording-status"
         )
         
         call_state.conversations[call.sid] = {
