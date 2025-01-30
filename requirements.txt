@@ -3,3 +3,5 @@ twilio
 openai
 flask-socketio
 PyPDF2
+gunicorn
+
