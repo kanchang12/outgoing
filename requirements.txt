@@ -1,5 +1,5 @@
 Flask
-twilio
+signalwire
 openai
 flask-socketio
 PyPDF2
