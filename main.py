@@ -1,23 +1,20 @@
 import os
-import openai
-import websockets
 from fastapi import FastAPI, WebSocket
+import websockets
 from twilio.rest import Client
-import uvicorn
+from twilio.twiml.voice_response import VoiceResponse
+from fastapi.responses import HTMLResponse
 
-# Load environment variables
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+# Define your Twilio and OpenAI credentials
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+PHONE_NUMBER_FROM = os.getenv('PHONE_NUMBER_FROM')
+PHONE_NUMBER_TO = os.getenv('PHONE_NUMBER_TO')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-# Initialize FastAPI
 app = FastAPI()
 
-# Initialize Twilio client
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-# Define the AI persona
+# Define the AI assistant's persona
 AI_PERSONA_PROMPT = """
 You are an enthusiastic sales agent specializing in social media marketing.
 Your goal is to convince the customer to sign up for our services.
@@ -27,9 +24,23 @@ Keep responses short, natural, and conversational.
 Always end with a strong call to action.
 """
 
+@app.post("/start-call")
+async def start_call():
+    client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+    # Place the call to the user
+    call = client.calls.create(
+        to=PHONE_NUMBER_TO,
+        from_=PHONE_NUMBER_FROM,
+        url="http://your-server-url.com/handle-call"  # Replace with your actual endpoint
+    )
+
+    return {"message": "Call initiated", "sid": call.sid}
+
 @app.websocket("/media-stream")
 async def media_stream(websocket: WebSocket):
     """ Handles real-time AI conversation with Twilio """
+
     await websocket.accept()
     print("🔄 Connection Opened")
 
@@ -38,6 +49,7 @@ async def media_stream(websocket: WebSocket):
             "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
             extra_headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "OpenAI-Beta": "realtime=v1"}
         ) as openai_ws:
+
             # Send the persona prompt first
             await openai_ws.send(AI_PERSONA_PROMPT)
 
@@ -64,6 +76,7 @@ async def media_stream(websocket: WebSocket):
         print("🔴 Connection Closed")
         await websocket.close()
 
+
 if __name__ == "__main__":
-    # Run the FastAPI app with uvicorn on port 8000
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
