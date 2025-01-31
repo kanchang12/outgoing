@@ -79,7 +79,9 @@ async def generate_response(user_input: str):
     except Exception as e:
         return JSONResponse(content={"message": f"Error generating response: {str(e)}"}, status_code=500)
 
-# Run the application with Uvicorn
+import os
+
 if __name__ == "__main__":
-    port = os.getenv("PORT", 8000)  # Ensure it runs on Koyeb's provided port
-    uvicorn.run(app, host="0.0.0.0", port=int(port))
+    port = int(os.getenv("PORT", 8000))  # Use the port Koyeb provides
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
