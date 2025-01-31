@@ -11,6 +11,9 @@ class DummyAudioInterface:
     
     def stop(self):
         pass
+    
+    def output(self, audio):
+        pass  # Just ignore the audio output
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
