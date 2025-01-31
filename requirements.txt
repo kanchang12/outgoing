@@ -1,5 +1,7 @@
 fastapi
 uvicorn
 twilio
+openai
 websockets
 python-dotenv
+
