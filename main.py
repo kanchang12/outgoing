@@ -2,82 +2,101 @@ from flask import Flask, render_template, request, jsonify
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Gather, Say
 from openai import OpenAI
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, emit
+from engineio.payload import Payload
 import PyPDF2
 import re
 import json
 from datetime import datetime
 import os
 
+# Initialize Flask and SocketIO with proper configuration
 app = Flask(__name__)
-socketio = SocketIO(app)
+Payload.max_decode_packets = 50
+socketio = SocketIO(app, 
+                   cors_allowed_origins="*",
+                   ping_timeout=60,
+                   ping_interval=25)
 
 # Initialize clients
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
 
+def clean_text(text):
+    """Clean extracted text from PDF"""
+    # Remove page markers
+    text = re.sub(r'\xa0 Page \d+ of \d+\xa0 \xa0', '', text)
+    # Remove URLs
+    text = re.sub(r'https?://\S+', '', text)
+    # Remove extra whitespace
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
 def extract_text_from_pdf(pdf_path):
-    """Extract text from PDF file"""
+    """Extract and clean text from PDF file"""
     with open(pdf_path, 'rb') as file:
         reader = PyPDF2.PdfReader(file)
         text = ""
         for page in reader.pages:
             text += page.extract_text()
-    return text
+    return clean_text(text)
 
 def parse_resume(pdf_text):
     """Parse relevant information from PDF text"""
+    # Improved regex patterns
     experience = re.findall(r'Experience(.*?)Education', pdf_text, re.DOTALL)
-    skills = re.findall(r'Top Skills(.*?)Languages', pdf_text, re.DOTALL)
+    skills = re.findall(r'Skills(.*?)Experience', pdf_text, re.DOTALL)
     education = re.findall(r'Education(.*?)$', pdf_text, re.DOTALL)
     
     return {
-        'experience': experience[0] if experience else '',
-        'skills': skills[0] if skills else '',
-        'education': education[0] if education else ''
+        'experience': clean_text(experience[0] if experience else ''),
+        'skills': clean_text(skills[0] if skills else ''),
+        'education': clean_text(education[0] if education else '')
     }
 
 # Read and parse PDF at startup
-# Direct path to PDF (assuming it's in the same folder as main.py)
 PDF_PATH = "Profile.pdf"
-
-# Extract text from the PDF
 pdf_text = extract_text_from_pdf(PDF_PATH)
-
-# Parse the resume content
 parsed_resume = parse_resume(pdf_text)
 
-SYSTEM_PROMPT = f"""
+# Updated system prompt
+SYSTEM_PROMPT = """
 You are James, a professional HR consultant discussing a candidate for an AI Developer (Freelance) position. 
 The candidate's profile:
 
 Key Skills:
-{parsed_resume['skills']}
+{skills}
 
-Relevant Experience:
-{parsed_resume['experience']}
+Recent Experience:
+{experience}
 
 Education:
-{parsed_resume['education']}
+{education}
 
 Core Personality Traits:
 - Professional and articulate
-- Knowledgeable about AI development and technical roles
+- Knowledgeable about AI development
 - Enthusiastic about the candidate's qualifications
-- Attentive to the employer's needs
+- Attentive to employer's needs
 
 Focus on highlighting:
 1. AI and automation experience
 2. Python development skills
 3. Chatbot development expertise
-4. Freelance project experience
-5. Technical writing abilities
+4. Technical project experience
+5. Problem-solving abilities
 
-Current conversation context: {{context}}
-Previous employer response: {{employer_response}}
+Current conversation context: {context}
+Previous employer response: {employer_response}
 
 Respond naturally as an HR consultant would in a phone conversation.
-"""
+""".format(
+    skills=parsed_resume['skills'],
+    experience=parsed_resume['experience'],
+    education=parsed_resume['education'],
+    context="{context}",
+    employer_response="{employer_response}"
+)
 
 class CallState:
     def __init__(self):
@@ -86,82 +105,55 @@ class CallState:
 
 call_state = CallState()
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
 def get_ai_response(context, employer_response):
-    """Get response from OpenAI with enhanced error handling"""
+    """Get response from OpenAI with improved error handling"""
     try:
-        # Debug print statements
-        print(f"Context received: {context}")
-        print(f"Employer response received: {employer_response}")
-        
-        # Verify OpenAI client
-        if not openai_client.api_key:
-            print("OpenAI API key is not set")
-            raise ValueError("OpenAI API key is missing")
+        # Handle the initial call case
+        if employer_response is None:
+            return None
             
-        # Verify parsed resume data
-        print(f"Parsed resume data: {parsed_resume}")
+        formatted_prompt = SYSTEM_PROMPT.format(
+            context=context or "Initial conversation",
+            employer_response=employer_response
+        )
         
-        # Format system prompt with error checking
-        try:
-            formatted_prompt = SYSTEM_PROMPT.format(
-                context=context or "Initial conversation",
-                employer_response=employer_response or "No response yet"
-            )
-            print(f"Formatted prompt: {formatted_prompt}")
-        except KeyError as e:
-            print(f"Error formatting prompt: {e}")
-            raise
-            
-        # Make API call
         response = openai_client.chat.completions.create(
             model="gpt-4-turbo-preview",
             messages=[
                 {"role": "system", "content": formatted_prompt},
-                {"role": "user", "content": employer_response or ""}
+                {"role": "user", "content": employer_response}
             ],
             max_tokens=250,
             temperature=0.7
         )
         
-        # Verify response
-        if not response.choices:
-            raise ValueError("No response choices returned from OpenAI")
-            
         return response.choices[0].message.content
-        
     except Exception as e:
-        print(f"Detailed error in get_ai_response: {str(e)}")
-        print(f"Error type: {type(e).__name__}")
-        import traceback
-        print(f"Stack trace: {traceback.format_exc()}")
-        return "I apologize, but I'm having trouble with my connection. Let me get back to you at a better time."
+        print(f"Error in get_ai_response: {str(e)}")
+        return "I apologize for the technical difficulty. Let me summarize the candidate's key qualifications. They have experience in AI development, chatbot design, and NLP, with recent projects in generative AI. Would you like to know more about their technical skills?"
+
+@app.route('/')
+def index():
+    return render_template('index.html')
 
 @app.route('/call', methods=['POST'])
 def initiate_call():
     """Initiate a call with recording"""
     try:
         phone_number = request.json['phone_number']
-        initial_message = (
-            "Hello, this is James from HR Solutions. This call is being recorded for quality purposes. "
-            "I'm reaching out regarding an experienced AI Developer candidate for your freelance position. "
-            "Would you have a moment to discuss their qualifications?"
-        )
         
         call = twilio_client.calls.create(
-            url="https://evident-orly-onewebonly-4acd77ba.koyeb.app/handle_call",  # Your Koyeb URL
+            url=f"https://evident-orly-onewebonly-4acd77ba.koyeb.app/handle_call",
             to=phone_number,
-            from_="+447488897093",
+            from_="+18452864551",
             record=True,
-            recording_status_callback=f"https://evident-orly-onewebonly-4acd77ba.koyeb.app/recording-status"
+            recording_status_callback="https://evident-orly-onewebonly-4acd77ba.koyeb.app/recording-status"
         )
         
+        # Initialize conversation state
         call_state.conversations[call.sid] = {
             "context": "Initial call",
-            "history": [{"ai": initial_message}],
+            "history": [],
             "transcription": ""
         }
         
@@ -171,73 +163,79 @@ def initiate_call():
 
 @app.route('/handle_call', methods=['POST'])
 def handle_call():
-    """Handle incoming call webhook"""
+    """Handle incoming call webhook with improved flow"""
     call_sid = request.values.get('CallSid')
     employer_response = request.values.get('SpeechResult')
     
-    if employer_response:
+    response = VoiceResponse()
+    
+    # Handle initial call
+    if not employer_response:
+        initial_message = (
+            "Hello, this is James from HR Solutions. I'm reaching out regarding an experienced AI Developer "
+            "candidate for your freelance position. They have strong experience in chatbot development and "
+            "generative AI. Would you have a moment to discuss their qualifications?"
+        )
+        response.say(initial_message, voice='Polly.Brian')
+        
+        # Initialize conversation state if not exists
+        if call_sid not in call_state.conversations:
+            call_state.conversations[call_sid] = {
+                "context": "Initial call",
+                "history": [{"ai": initial_message}],
+                "transcription": f"James: {initial_message}\n"
+            }
+    else:
+        # Handle subsequent interactions
+        conversation = call_state.conversations.get(call_sid, {
+            "context": "Initial call",
+            "history": [],
+            "transcription": ""
+        })
+        
+        # Log employer response
+        conversation["transcription"] += f"Employer: {employer_response}\n"
         socketio.emit('transcription', {
             'speaker': 'Employer',
             'text': employer_response,
             'timestamp': datetime.now().isoformat()
         })
         
-        if call_sid in call_state.conversations:
-            call_state.conversations[call_sid]["transcription"] += f"Employer: {employer_response}\n"
+        # Get and handle AI response
+        ai_response = get_ai_response(conversation["context"], employer_response)
+        if ai_response:
+            response.say(ai_response, voice='Polly.Brian')
+            conversation["history"].append({
+                "employer": employer_response,
+                "ai": ai_response
+            })
+            conversation["transcription"] += f"James: {ai_response}\n"
+            conversation["context"] = f"Previous conversation: {json.dumps(conversation['history'])}"
+            call_state.conversations[call_sid] = conversation
+            
+            socketio.emit('transcription', {
+                'speaker': 'James',
+                'text': ai_response,
+                'timestamp': datetime.now().isoformat()
+            })
     
-    conversation = call_state.conversations.get(call_sid, {
-        "context": "Initial call",
-        "history": [],
-        "transcription": ""
-    })
-    
-    ai_response = get_ai_response(conversation["context"], employer_response)
-    
-    socketio.emit('transcription', {
-        'speaker': 'James',
-        'text': ai_response,
-        'timestamp': datetime.now().isoformat()
-    })
-    
-    conversation["history"].append({
-        "employer": employer_response,
-        "ai": ai_response
-    })
-    conversation["context"] = f"Previous conversation: {json.dumps(conversation['history'])}"
-    conversation["transcription"] += f"James: {ai_response}\n"
-    call_state.conversations[call_sid] = conversation
-    
-    response = VoiceResponse()
-    response.say(ai_response, voice='Polly.Brian')
-    
+    # Set up speech gathering
     gather = Gather(input='speech', timeout=3, action='/handle_call')
     response.append(gather)
     
     return str(response)
 
-@app.route('/end-call', methods=['POST'])
-def end_call():
-    """End the call and save recording"""
-    try:
-        call_sid = request.json['call_sid']
-        call = twilio_client.calls(call_sid).update(status="completed")
-        return jsonify({"status": "success"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
 
-@app.route('/download-transcript/<call_sid>')
-def download_transcript(call_sid):
-    """Download call transcript"""
-    if call_sid in call_state.conversations:
-        transcript = call_state.conversations[call_sid]["transcription"]
-        return jsonify({
-            "status": "success",
-            "transcript": transcript
-        })
-    return jsonify({
-        "status": "error",
-        "message": "Transcript not found"
-    })
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    socketio.run(app, 
+                debug=True,
+                host='0.0.0.0',
+                port=5000,
+                allow_unsafe_werkzeug=True)
