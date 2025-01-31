@@ -86,6 +86,13 @@ Focus on highlighting:
 4. Technical project experience
 5. Problem-solving abilities
 
+**Important Guidelines:**
+- If the employer says "I am busy" → Politely acknowledge and do not follow up.
+- If they say "I am not the right person" → Thank them and end the call.
+- Keep responses short and to the point, avoid long explanations.
+- Respond quickly to maintain a natural conversation flow.
+
+
 Current conversation context: {context}
 Previous employer response: {employer_response}
 
@@ -123,8 +130,8 @@ def get_ai_response(context, employer_response):
                 {"role": "system", "content": formatted_prompt},
                 {"role": "user", "content": employer_response}
             ],
-            max_tokens=250,
-            temperature=0.7
+            max_tokens=100,
+            temperature=0.5
         )
         
         return response.choices[0].message.content
@@ -176,7 +183,7 @@ def handle_call():
             "candidate for your freelance position. They have strong experience in chatbot development and "
             "generative AI. Would you have a moment to discuss their qualifications?"
         )
-        response.say(initial_message, voice='Polly.Brian')
+        response.say(initial_message, voice='Polly.Brian', timeout=0)
         
         # Initialize conversation state if not exists
         if call_sid not in call_state.conversations:
@@ -220,7 +227,7 @@ def handle_call():
             })
     
     # Set up speech gathering
-    gather = Gather(input='speech', timeout=3, action='/handle_call')
+    gather = Gather(input='speech', timeout=3, action='/handle_call', bargeIn=True)
     response.append(gather)
     
     return str(response)
