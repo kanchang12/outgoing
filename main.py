@@ -3,7 +3,7 @@ from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from twilio.rest import Client as TwilioClient
 from openai import OpenAI
-from elevenlabs import play, generate
+from elevenlabs import voices, save, stream
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -19,7 +19,7 @@ class AICallSystem:
         
         # Configuration
         self.twilio_number = os.getenv('TWILIO_PHONE_NUMBER')
-        self.elevenlabs_voice = "your_preset_voice_id"
+        self.elevenlabs_voice = voices()[0].voice_id  # Use first available voice
 
         # System prompt for consistent AI behavior
         self.SYSTEM_PROMPT = """You are a helpful AI assistant conducting a phone conversation. 
@@ -42,13 +42,13 @@ class AICallSystem:
 
     def text_to_speech(self, text):
         """Convert text to speech using ElevenLabs"""
-        audio = generate(
+        audio = stream(
             text=text,
             voice=self.elevenlabs_voice
         )
         # Save audio locally
         with open("response.mp3", "wb") as f:
-            f.write(audio)
+            f.write(audio.read())
         return "response.mp3"
 
     def initiate_call(self, to_number):
