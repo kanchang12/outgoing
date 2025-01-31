@@ -183,7 +183,7 @@ def handle_call():
             "candidate for your freelance position. They have strong experience in chatbot development and "
             "generative AI. Would you have a moment to discuss their qualifications?"
         )
-        response.say(initial_message, voice='Polly.Brian', timeout=0)
+        response.say(initial_message, voice='Polly.Brian')
         
         # Initialize conversation state if not exists
         if call_sid not in call_state.conversations:
