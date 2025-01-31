@@ -1,69 +1,35 @@
 import os
-import asyncio
+import openai
 import websockets
-from fastapi import FastAPI, BackgroundTasks, WebSocket
-from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
+from fastapi import FastAPI, WebSocket
 from twilio.rest import Client
+import uvicorn
 
 # Load environment variables
-load_dotenv()
-
-# Twilio API credentials
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-PHONE_NUMBER_FROM = "+18452864551"  # Twilio Number
-PHONE_NUMBER_TO = "+447823656762"  # User's Number
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 
-# OpenAI API Key
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Initialize FastAPI
+app = FastAPI()
 
 # Initialize Twilio client
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-# FastAPI instance
-app = FastAPI()
-
-
-@app.get("/")
-async def home():
-    return {"message": "Twilio AI Voice Assistant Running!"}
-
-
-@app.get("/start-call")
-async def start_call(background_tasks: BackgroundTasks):
-    """ Initiates a call with real-time AI conversation """
-    try:
-        # Start call with media stream enabled
-        call = twilio_client.calls.create(
-            to=PHONE_NUMBER_TO,
-            from_=PHONE_NUMBER_FROM,
-            twiml=f"""
-                <Response>
-                    <Start>
-                        <Stream url="wss://evident-orly-onewebonly-4acd77ba.koyeb.app/media-stream" />
-                    </Start>
-                    <Say>Connecting you to our AI Assistant. Please start speaking.</Say>
-                </Response>
-            """,
-        )
-
-        background_tasks.add_task(log_call, call.sid)
-        return JSONResponse(content={"message": "Call initiated!", "call_sid": call.sid}, status_code=200)
-
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
-async def log_call(call_sid: str):
-    """ Log the call SID """
-    print(f"📞 Call started with SID: {call_sid}")
-
+# Define the AI persona
+AI_PERSONA_PROMPT = """
+You are an enthusiastic sales agent specializing in social media marketing.
+Your goal is to convince the customer to sign up for our services.
+Be confident, engaging, and persuasive, but not pushy.
+Address objections with smart counters.
+Keep responses short, natural, and conversational.
+Always end with a strong call to action.
+"""
 
 @app.websocket("/media-stream")
 async def media_stream(websocket: WebSocket):
-    """ Handles real-time audio streaming between Twilio and OpenAI """
-
+    """ Handles real-time AI conversation with Twilio """
     await websocket.accept()
     print("🔄 Connection Opened")
 
@@ -72,9 +38,11 @@ async def media_stream(websocket: WebSocket):
             "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
             extra_headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "OpenAI-Beta": "realtime=v1"}
         ) as openai_ws:
+            # Send the persona prompt first
+            await openai_ws.send(AI_PERSONA_PROMPT)
 
             while True:
-                # Receive audio from Twilio
+                # Receive user speech from Twilio
                 audio_data = await websocket.receive_bytes()
 
                 if not audio_data:
@@ -83,7 +51,7 @@ async def media_stream(websocket: WebSocket):
                 # Send user audio to OpenAI
                 await openai_ws.send(audio_data)
 
-                # Get AI response
+                # Get AI-generated response
                 ai_audio_response = await openai_ws.recv()
 
                 # Send AI response back to Twilio
@@ -95,3 +63,7 @@ async def media_stream(websocket: WebSocket):
     finally:
         print("🔴 Connection Closed")
         await websocket.close()
+
+if __name__ == "__main__":
+    # Run the FastAPI app with uvicorn on port 8000
+    uvicorn.run(app, host="0.0.0.0", port=8000)
