@@ -4,6 +4,14 @@ import os
 from elevenlabs.client import ElevenLabs
 from elevenlabs.conversational_ai.conversation import Conversation
 
+# Dummy Audio Interface to bypass audio-related functions
+class DummyAudioInterface:
+    def start(self, input_callback=None):
+        pass
+    
+    def stop(self):
+        pass
+
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -23,12 +31,12 @@ def place_call(phone_number):
     logging.debug(f"Placing call to phone number: {phone_number}")
     
     try:
-        # Set 'requires_auth' based on API_KEY, and no audio interface required
+        # Set 'requires_auth' based on API_KEY, and use DummyAudioInterface
         conversation = Conversation(
             client, 
             AGENT_ID, 
             requires_auth=bool(API_KEY),  # True if API_KEY exists
-            audio_interface=None  # No audio interface needed
+            audio_interface=DummyAudioInterface()  # Use Dummy Audio Interface
         )
         
         # Start the conversation
