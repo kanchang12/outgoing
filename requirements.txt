@@ -1,9 +1,1 @@
-Flask
-flask-socketio
-twilio
-openai
-python-dotenv
-gunicorn
-PyPDF2
-websockets
-httpx
+elevenlabs
