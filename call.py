@@ -1,36 +1,47 @@
 import sys
+import logging
 import os
 from elevenlabs.client import ElevenLabs
 from elevenlabs.conversational_ai.conversation import Conversation
-from elevenlabs.conversational_ai.default_audio_interface import DefaultAudioInterface
+
+# Setup logging
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Get environment variables (Agent ID and API key)
+AGENT_ID = os.getenv("AGENT_ID")
+API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 # Ensure environment variables are set
-API_KEY = os.getenv("ELEVENLABS_API_KEY")
-AGENT_ID = os.getenv("AGENT_ID")
-
-# Extract the phone number from the command line arguments
-phone_number = sys.argv[1]
+if not AGENT_ID or not API_KEY:
+    logging.error("Agent ID or API key is missing!")
+    sys.exit(1)
 
 # Initialize ElevenLabs client
 client = ElevenLabs(api_key=API_KEY)
 
-# Create a conversation
-conversation = Conversation(
-    client,
-    AGENT_ID,
-    requires_auth=bool(API_KEY),
-    audio_interface=DefaultAudioInterface(),
-    callback_agent_response=lambda response: print(f"Agent: {response}"),
-    callback_user_transcript=lambda transcript: print(f"User: {transcript}")
-)
+def place_call(phone_number):
+    logging.debug(f"Placing call to phone number: {phone_number}")
+    
+    try:
+        # Initialize conversation without audio interface
+        conversation = Conversation(client, AGENT_ID)
+        
+        # Start the conversation
+        logging.debug(f"Starting conversation for phone number: {phone_number}")
+        conversation.start_session()
 
-# Assuming you would add code here to trigger the call based on the phone number
+        logging.debug(f"Call successfully initiated with agent ID {AGENT_ID}")
+        return "Call placed successfully!"
+    
+    except Exception as e:
+        logging.error(f"Error placing call: {str(e)}")
+        return f"Error placing call: {str(e)}"
 
-# Start the conversation session
-conversation.start_session()
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        logging.error("Phone number not provided!")
+        sys.exit(1)
 
-# Example: Set up the callback for handling the conversation
-# This is a placeholder where you might add the code to trigger a voice call
-
-# Clean shutdown when the session ends
-conversation.wait_for_session_end()
+    phone_number = sys.argv[1]
+    result = place_call(phone_number)
+    logging.info(result)
