@@ -1,7 +1,9 @@
-fastapi
-uvicorn
+Flask
+Flask-SocketIO
 twilio
 openai
-websockets
 python-dotenv
-
+PyPDF2
+requests
+Werkzeug
+engineio
