@@ -1,32 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Make a Call</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Call</title>
 </head>
 <body>
-  <h1>Place a Call</h1>
-  <label for="phoneNumber">Phone Number:</label>
-  <input type="text" id="phoneNumber" placeholder="Enter phone number">
-  <button id="callButton">Place Call</button>
-
-  <script>
-    document.getElementById("callButton").addEventListener("click", function() {
-      const phoneNumber = document.getElementById("phoneNumber").value;
-      fetch("/call", {
-        method: "POST",
-        body: JSON.stringify({ phoneNumber: phoneNumber }),
-        headers: { "Content-Type": "application/json" }
-      })
-      .then(response => response.json())
-      .then(data => {
-        alert(data.message);
-      })
-      .catch(error => {
-        alert("Error placing the call");
-      });
-    });
-  </script>
+    <h1>Make a Call to AI Agent</h1>
+    <!-- AI Widget -->
+    <elevenlabs-convai agent-id="PVgjYW7NurgQG0bz3qCz"></elevenlabs-convai>
+    <script src="https://elevenlabs.io/convai-widget/index.js" async type="text/javascript"></script>
 </body>
 </html>
