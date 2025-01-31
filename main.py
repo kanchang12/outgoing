@@ -304,7 +304,7 @@ def ws_connect():
 @socketio.on_error_default
 def default_error_handler(e):
     print(f'SocketIO error: {str(e)}')
-    socketio.emit('error', {'message': 'An error occurred'}
+    socketio.emit('error', {'message': 'An error occurred'})
 
                   
 @app.route('/ws-disconnect', methods=['POST'])
