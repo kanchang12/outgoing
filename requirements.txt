@@ -1,8 +1,5 @@
-Flask
-signalwire
+fastapi
+uvicorn
+twilio
+python-dotenv
 openai
-flask-socketio
-PyPDF2
-websockets
-eventlet==0.34.2
-gunicorn==21.2.0
