@@ -61,42 +61,17 @@ parsed_resume = parse_resume(pdf_text)
 
 # Updated system prompt
 SYSTEM_PROMPT = """
-You are James, a professional HR consultant discussing a candidate for an AI Developer (Freelance) position. 
-The candidate's profile:
+You are James, a professional HR consultant discussing an AI Developer candidate. 
+Keep responses under 15 words unless asked for details.
+Be direct and concise.
+Pause for employer responses.
 
-Key Skills:
-{skills}
+Candidate Skills: {skills}
+Recent Experience: {experience}
 
-Recent Experience:
-{experience}
-
-Education:
-{education}
-
-Core Personality Traits:
-- Professional and articulate
-- Knowledgeable about AI development
-- Enthusiastic about the candidate's qualifications
-- Attentive to employer's needs
-
-Focus on highlighting:
-1. AI and automation experience
-2. Python development skills
-3. Chatbot development expertise
-4. Technical project experience
-5. Problem-solving abilities
-
-Current conversation context: {context}
-Previous employer response: {employer_response}
-
-Respond naturally as an HR consultant would in a phone conversation.
-""".format(
-    skills=parsed_resume['skills'],
-    experience=parsed_resume['experience'],
-    education=parsed_resume['education'],
-    context="{context}",
-    employer_response="{employer_response}"
-)
+Current context: {context}
+Employer response: {employer_response}
+"""
 
 class CallState:
     def __init__(self):
@@ -106,14 +81,11 @@ class CallState:
 call_state = CallState()
 
 def get_ai_response(context, employer_response):
-    """Get response from OpenAI with improved error handling"""
     try:
-        # Handle the initial call case
-        if employer_response is None:
-            return None
-            
         formatted_prompt = SYSTEM_PROMPT.format(
-            context=context or "Initial conversation",
+            skills=parsed_resume['skills'],
+            experience=parsed_resume['experience'][:100],  # Limit length
+            context=context,
             employer_response=employer_response
         )
         
@@ -123,14 +95,12 @@ def get_ai_response(context, employer_response):
                 {"role": "system", "content": formatted_prompt},
                 {"role": "user", "content": employer_response}
             ],
-            max_tokens=250,
+            max_tokens=50,  # Reduced tokens for shorter responses
             temperature=0.7
         )
         
         return response.choices[0].message.content
-    except Exception as e:
-        print(f"Error in get_ai_response: {str(e)}")
-        return "I apologize for the technical difficulty. Let me summarize the candidate's key qualifications. They have experience in AI development, chatbot design, and NLP, with recent projects in generative AI. Would you like to know more about their technical skills?"
+    except Exception as e
 
 @app.route('/')
 def index():
@@ -163,22 +133,15 @@ def initiate_call():
 
 @app.route('/handle_call', methods=['POST'])
 def handle_call():
-    """Handle incoming call webhook with improved flow"""
     call_sid = request.values.get('CallSid')
     employer_response = request.values.get('SpeechResult')
     
     response = VoiceResponse()
     
-    # Handle initial call
     if not employer_response:
-        initial_message = (
-            "Hello, this is James from HR Solutions. I'm reaching out regarding an experienced AI Developer "
-            "candidate for your freelance position. They have strong experience in chatbot development and "
-            "generative AI. Would you have a moment to discuss their qualifications?"
-        )
+        initial_message = "Hi, James here about an AI Developer position. Got a minute to discuss?"
         response.say(initial_message, voice='Polly.Brian')
         
-        # Initialize conversation state if not exists
         if call_sid not in call_state.conversations:
             call_state.conversations[call_sid] = {
                 "context": "Initial call",
@@ -186,43 +149,27 @@ def handle_call():
                 "transcription": f"James: {initial_message}\n"
             }
     else:
-        # Handle subsequent interactions
         conversation = call_state.conversations.get(call_sid, {
             "context": "Initial call",
             "history": [],
             "transcription": ""
         })
         
-        # Log employer response
-        conversation["transcription"] += f"Employer: {employer_response}\n"
-        socketio.emit('transcription', {
-            'speaker': 'Employer',
-            'text': employer_response,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        # Get and handle AI response
+        # Set shorter timeout and bargein=True to allow interruption
+        gather = Gather(input='speech', timeout=1, action='/handle_call', bargein=True)
+        response.append(gather)
+
         ai_response = get_ai_response(conversation["context"], employer_response)
         if ai_response:
-            response.say(ai_response, voice='Polly.Brian')
+            response.say(ai_response, voice='Polly.Brian', bargein=True)
+            
             conversation["history"].append({
                 "employer": employer_response,
                 "ai": ai_response
             })
             conversation["transcription"] += f"James: {ai_response}\n"
-            conversation["context"] = f"Previous conversation: {json.dumps(conversation['history'])}"
             call_state.conversations[call_sid] = conversation
-            
-            socketio.emit('transcription', {
-                'speaker': 'James',
-                'text': ai_response,
-                'timestamp': datetime.now().isoformat()
-            })
-    
-    # Set up speech gathering
-    gather = Gather(input='speech', timeout=3, action='/handle_call')
-    response.append(gather)
-    
+
     return str(response)
 
 @socketio.on('connect')
