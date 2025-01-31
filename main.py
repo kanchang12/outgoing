@@ -91,23 +91,53 @@ def index():
     return render_template('index.html')
 
 def get_ai_response(context, employer_response):
-    """Get response from OpenAI"""
+    """Get response from OpenAI with enhanced error handling"""
     try:
+        # Debug print statements
+        print(f"Context received: {context}")
+        print(f"Employer response received: {employer_response}")
+        
+        # Verify OpenAI client
+        if not openai_client.api_key:
+            print("OpenAI API key is not set")
+            raise ValueError("OpenAI API key is missing")
+            
+        # Verify parsed resume data
+        print(f"Parsed resume data: {parsed_resume}")
+        
+        # Format system prompt with error checking
+        try:
+            formatted_prompt = SYSTEM_PROMPT.format(
+                context=context or "Initial conversation",
+                employer_response=employer_response or "No response yet"
+            )
+            print(f"Formatted prompt: {formatted_prompt}")
+        except KeyError as e:
+            print(f"Error formatting prompt: {e}")
+            raise
+            
+        # Make API call
         response = openai_client.chat.completions.create(
             model="gpt-4-turbo-preview",
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT.format(
-                    context=context,
-                    employer_response=employer_response
-                )},
-                {"role": "user", "content": employer_response}
+                {"role": "system", "content": formatted_prompt},
+                {"role": "user", "content": employer_response or ""}
             ],
             max_tokens=250,
             temperature=0.7
         )
+        
+        # Verify response
+        if not response.choices:
+            raise ValueError("No response choices returned from OpenAI")
+            
         return response.choices[0].message.content
+        
     except Exception as e:
-        print(f"Error getting AI response: {e}")
+        print(f"Detailed error in get_ai_response: {str(e)}")
+        print(f"Error type: {type(e).__name__}")
+        import traceback
+        print(f"Stack trace: {traceback.format_exc()}")
         return "I apologize, but I'm having trouble with my connection. Let me get back to you at a better time."
 
 @app.route('/call', methods=['POST'])
