@@ -1,69 +1,85 @@
 import os
-from fastapi import FastAPI, BackgroundTasks
+import json
+import asyncio
+from fastapi import FastAPI
 from twilio.rest import Client
-from twilio.twiml.voice_response import VoiceResponse
-import openai
+from fastapi.responses import JSONResponse
+from fastapi import BackgroundTasks
+import uvicorn
 from dotenv import load_dotenv
+from openai import OpenAI
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# Initialize Twilio and OpenAI clients
-openai.api_key = os.getenv("OPENAI_API_KEY")
-twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+# Twilio API credentials
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+PHONE_NUMBER_FROM = os.getenv("PHONE_NUMBER_FROM")  # Your Twilio phone number
 
+# OpenAI credentials and client
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# FastAPI app instance
 app = FastAPI()
 
-# Call details
-CALLER_ID = os.getenv("PHONE_NUMBER_FROM")  # Your Twilio phone number
-TARGET_PHONE = "+447823656762"  # The target phone number
-CALLER_NAME = "Social Media Marketing Expert"
+# Twilio Client
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-@app.get("/start-call")
+# This will be used to start the call
+CALL_NUMBER_FROM = '+18452864551'  # The calling number
+CALL_NUMBER_TO = '+447823656762'  # The target number you want to call
+
+@app.get('/')
+async def index():
+    return {"message": "Welcome to the Twilio AI Assistant"}
+
+# This endpoint triggers the outbound call
+@app.get('/start-call')
 async def start_call(background_tasks: BackgroundTasks):
-    """Start a marketing call via Twilio."""
-    background_tasks.add_task(make_call)
-    return {"message": "Call is being initiated!"}
-
-def make_call():
-    """Initiate a call and connect it with a Twilio Stream."""
-    # Create the call using Twilio's REST API
-    call = twilio_client.calls.create(
-        to=TARGET_PHONE,
-        from_=CALLER_ID,
-        url="http://demo.twilio.com/docs/voice.xml"  # Twilio will request this URL to play the first response
-    )
-    print(f"Call initiated: SID {call.sid}")
-
-@app.post("/twilio-webhook")
-async def twilio_webhook(data: dict):
-    """Handle the Twilio response to the call."""
-    response = VoiceResponse()
-
-    # AI-generated marketing message
-    prompt = (
-        "You are a social media marketing expert calling a business. "
-        "Introduce yourself as a professional offering social media marketing services. "
-        "Talk about the importance of online presence, branding, and how you can help them grow their business."
-    )
-
-    # Get response from OpenAI (AI-based sales script)
     try:
-        ai_response = openai.Completion.create(
-            model="text-davinci-003",  # Or another model you prefer
-            prompt=prompt,
+        # Creating the Twilio outbound call
+        call = twilio_client.calls.create(
+            to=CALL_NUMBER_TO,
+            from_=CALL_NUMBER_FROM,
+            twiml='<Response><Say>Hi! This is a marketing call from our team. We have exciting offers for you!</Say><Pause length="2"/><Say>For more information, visit our website or contact our support team.</Say></Response>'
+        )
+
+        background_tasks.add_task(log_call_sid, call.sid)
+        return JSONResponse(content={"message": "Call is being initiated!", "call_sid": call.sid}, status_code=200)
+    
+    except Exception as e:
+        return JSONResponse(content={"message": f"Error initiating call: {str(e)}"}, status_code=500)
+
+# Log the call SID for reference
+async def log_call_sid(call_sid: str):
+    print(f"Call initiated with SID: {call_sid}")
+
+# OpenAI conversation (current API format with gpt-4-turbo)
+@app.post('/generate-response')
+async def generate_response(user_input: str):
+    try:
+        formatted_prompt = "You are a marketing assistant providing product offers."
+        
+        # Send the prompt to OpenAI's GPT-4 Turbo API
+        response = openai_client.chat.completions.create(
+            model="gpt-4-turbo-preview",
+            messages=[
+                {"role": "system", "content": formatted_prompt},
+                {"role": "user", "content": user_input}
+            ],
             max_tokens=150,
             temperature=0.7
         )
-        message = ai_response.choices[0].text.strip()
-        print(f"AI message: {message}")
-
-        # Add the AI response as a speech prompt
-        response.say(message, voice="alice")
-
+        
+        # Extract response text
+        assistant_reply = response['choices'][0]['message']['content']
+        return JSONResponse(content={"message": assistant_reply}, status_code=200)
+    
     except Exception as e:
-        print(f"Error generating AI response: {e}")
-        response.say("Sorry, I couldn't generate a message at this time.", voice="alice")
+        return JSONResponse(content={"message": f"Error generating response: {str(e)}"}, status_code=500)
 
-    return str(response)
-
+# Run the application with Uvicorn
+if __name__ == "__main__":
+    port = os.getenv("PORT", 8000)  # Ensure it runs on Koyeb's provided port
+    uvicorn.run(app, host="0.0.0.0", port=int(port))
