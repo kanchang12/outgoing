@@ -76,9 +76,9 @@ def start_call():
         phone_number = request.json.get('phone_number')
         
         call = twilio_client.calls.create(
-            url=f"https://{os.getenv('DOMAIN')}/handle_call",
-            to=phone_number,
-            from_=PHONE_NUMBER_FROM,
+            url="https://evident-orly-onewebonly-4acd77ba.koyeb.app/start-call",
+            to=+447823656762,
+            from_=+18452864551,
             record=True
         )
         
