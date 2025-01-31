@@ -215,6 +215,12 @@ def handle_call():
     
     response = VoiceResponse()
     
+    # Log the employer's response
+    if employer_response:
+        print(f"Employer responded with: {employer_response}")
+    else:
+        print("No response detected.")
+    
     # If employer starts speaking, interrupt the AI's speech
     if employer_response:
         print("Employer started speaking, interrupting AI...")
@@ -279,6 +285,7 @@ def handle_call():
     response.append(gather)
     
     return str(response)
+
 
 @socketio.on('connect')
 def handle_connect():
