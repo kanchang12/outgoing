@@ -13,6 +13,14 @@ twilio_client = Client(
 )
 openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
+def should_end_call(user_input):
+    """Check if user's input indicates they want to end the call"""
+    ending_phrases = [
+        'thank you', 'thanks', 'bye', 'goodbye', 'take care', 
+        'see you', 'good bye', 'have a good day', 'end call'
+    ]
+    return any(phrase in user_input.lower() for phrase in ending_phrases)
+
 def generate_response(user_input):
     try:
         response = openai_client.chat.completions.create(
@@ -35,24 +43,35 @@ def webhook():
     # Get user's speech input if any
     user_input = request.values.get('SpeechResult')
     
-    # Create a Gather object to collect user speech
-    gather = Gather(
-        input='speech',
-        action='/webhook',
-        method='POST',
-        speech_timeout='auto',
-        interrupt='true'
-    )
-    
     if user_input:
+        # Check if user wants to end call
+        if should_end_call(user_input):
+            response.say("Thank you for calling. Goodbye!")
+            response.hangup()
+            return str(response)
+    
         # Generate and speak AI response
         ai_response = generate_response(user_input)
+        gather = Gather(
+            input='speech',
+            action='/webhook',
+            method='POST',
+            speech_timeout='auto',
+            interrupt='true'
+        )
         gather.say(ai_response)
+        response.append(gather)
     else:
         # Initial greeting
+        gather = Gather(
+            input='speech',
+            action='/webhook',
+            method='POST',
+            speech_timeout='auto',
+            interrupt='true'
+        )
         gather.say("Hello! How can I help you today?")
-    
-    response.append(gather)
+        response.append(gather)
     
     # Add a redirect to handle no input
     response.redirect('/webhook')
