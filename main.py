@@ -9,28 +9,33 @@ import re
 import json
 from datetime import datetime
 import os
+import asyncio
+import websockets
+from concurrent.futures import ThreadPoolExecutor
 
-openai_ws = None  # Initialize globally (or replace this with actual WebSocket setup logic)
-
-# Initialize Flask and SocketIO with proper configuration
 app = Flask(__name__)
 Payload.max_decode_packets = 50
 socketio = SocketIO(app, 
                    cors_allowed_origins="*",
+                   async_mode='eventlet',
                    ping_timeout=60,
-                   ping_interval=25)
+                   ping_interval=25,
+                   max_http_buffer_size=1e8)
 
 # Initialize clients
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
 
+# Create thread pool for async operations
+executor = ThreadPoolExecutor(max_workers=10)
+
+# NEW: WebSocket connections dictionary
+ws_connections = {}
+
 def clean_text(text):
     """Clean extracted text from PDF"""
-    # Remove page markers
     text = re.sub(r'\xa0 Page \d+ of \d+\xa0 \xa0', '', text)
-    # Remove URLs
     text = re.sub(r'https?://\S+', '', text)
-    # Remove extra whitespace
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
@@ -45,7 +50,6 @@ def extract_text_from_pdf(pdf_path):
 
 def parse_resume(pdf_text):
     """Parse relevant information from PDF text"""
-    # Improved regex patterns
     experience = re.findall(r'Experience(.*?)Education', pdf_text, re.DOTALL)
     skills = re.findall(r'Skills(.*?)Experience', pdf_text, re.DOTALL)
     education = re.findall(r'Education(.*?)$', pdf_text, re.DOTALL)
@@ -61,6 +65,7 @@ PDF_PATH = "Profile.pdf"
 pdf_text = extract_text_from_pdf(PDF_PATH)
 parsed_resume = parse_resume(pdf_text)
 
+# Keep your existing SYSTEM_PROMPT
 # Updated system prompt
 SYSTEM_PROMPT = """
 You are James, a professional HR consultant conducting a phone conversation about a candidate for an AI Developer (Freelance) position.
@@ -148,35 +153,36 @@ class CallState:
     def __init__(self):
         self.conversations = {}
         self.recordings = {}
+        # NEW: Add WebSocket tracking
+        self.active_ws = {}
 
 call_state = CallState()
 
+# MODIFIED: Optimized AI response function
 def get_ai_response(context, employer_response):
-    """Get response from OpenAI with improved error handling"""
+    """Get response from OpenAI with improved performance"""
     try:
-        # Handle the initial call case
         if employer_response is None:
             return None
             
-        formatted_prompt = SYSTEM_PROMPT.format(
-            context=context or "Initial conversation",
-            employer_response=employer_response
-        )
+        # NEW: Use shorter context to reduce tokens
+        recent_context = context[-500:] if context else "Initial conversation"
         
         response = openai_client.chat.completions.create(
             model="gpt-4-turbo-preview",
             messages=[
-                {"role": "system", "content": formatted_prompt},
-                {"role": "user", "content": employer_response}
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Context: {recent_context}\nUser: {employer_response}"}
             ],
             max_tokens=50,
-            temperature=0.7
+            temperature=0.7,
+            presence_penalty=0.6  # NEW: Add presence penalty for more concise responses
         )
         
         return response.choices[0].message.content
     except Exception as e:
         print(f"Error in get_ai_response: {str(e)}")
-        return "I apologize for the technical difficulty. Let me summarize the candidate's key qualifications. They have experience in AI development, chatbot design, and NLP, with recent projects in generative AI. Would you like to know more about their technical skills?"
+        return "I apologize for the technical difficulty. Would you like to know about the candidate's key qualifications?"
 
 @app.route('/')
 def index():
@@ -196,7 +202,6 @@ def initiate_call():
             recording_status_callback="https://evident-orly-onewebonly-4acd77ba.koyeb.app/recording-status"
         )
         
-        # Initialize conversation state
         call_state.conversations[call.sid] = {
             "context": "Initial call",
             "history": [],
@@ -207,53 +212,49 @@ def initiate_call():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
+# MODIFIED: Handle call with interrupt support
 @app.route('/handle_call', methods=['POST'])
 def handle_call():
-    """Handle incoming call webhook with improved flow"""
+    """Handle incoming call webhook with interrupt support"""
     call_sid = request.values.get('CallSid')
-    employer_response = request.values.get('SpeechResult')  # Employer's speech response
+    stream_sid = request.values.get('StreamSid')
+    employer_response = request.values.get('SpeechResult')
     
     response = VoiceResponse()
     
-    # Step 1: Check if employer starts speaking
-    if employer_response:
-        print("Employer started speaking, interrupting AI...")
-
-        # Interrupt the AI's speech by sending a clear signal to stop it
-        if openai_ws is not None:
-            # Send a clear command to stop AI speech
-            clear_twilio = {
-                "streamSid": request.values.get('StreamSid'),
-                "event": "clear"  # Clear the speech stream for Twilio
+    # NEW: Handle interruption
+    if employer_response and stream_sid in ws_connections:
+        try:
+            # Clear Twilio audio
+            clear_message = {
+                "streamSid": stream_sid,
+                "event": "clear"
             }
-            openai_ws.send(json.dumps(clear_twilio))  # Sending the clear command
-
-            # Send interrupt message to OpenAI (Cancel AI's response)
-            interrupt_message = {"type": "response.cancel"}
-            openai_ws.send(json.dumps(interrupt_message))  # Cancel AI speech
-            print("AI speech interrupted and stopped.")
+            ws_connections[stream_sid].send(json.dumps(clear_message))
+            
+            # Cancel OpenAI response if active
+            if stream_sid in call_state.active_ws:
+                cancel_message = {"type": "response.cancel"}
+                call_state.active_ws[stream_sid].send(json.dumps(cancel_message))
+        except Exception as e:
+            print(f"Interrupt error: {str(e)}")
     
-    # Step 2: Handle initial or follow-up call
     if not employer_response:
-        # Initial message if there's no employer response yet
         initial_message = "Hello, this is James from HR Solutions. Is it a right time to talk?"
-        response.say(initial_message, voice='Polly.Brian', bargein=True)  # Allow interruption
+        response.say(initial_message, voice='Polly.Brian', bargein=True)
         
-        # Initialize conversation state if it doesn't exist
         call_state.conversations[call_sid] = {
             "context": "Initial call",
             "history": [{"ai": initial_message}],
             "transcription": f"James: {initial_message}\n"
         }
     else:
-        # Handling subsequent employer responses
         conversation = call_state.conversations.get(call_sid, {
             "context": "Initial call",
             "history": [],
             "transcription": ""
         })
         
-        # Log employer response
         conversation["transcription"] += f"Employer: {employer_response}\n"
         socketio.emit('transcription', {
             'speaker': 'Employer',
@@ -261,13 +262,15 @@ def handle_call():
             'timestamp': datetime.now().isoformat()
         })
         
-        # Get AI response after employer speaks
-        ai_response = get_ai_response(conversation["context"], employer_response)
+        # NEW: Use thread pool for AI response
+        future = executor.submit(get_ai_response, conversation["context"], employer_response)
+        ai_response = future.result(timeout=5)  # 5-second timeout
+        
         if ai_response:
-            response.say(ai_response, voice='Polly.Brian')
+            response.say(ai_response, voice='Polly.Brian', bargein=True)
             conversation["history"].append({"employer": employer_response, "ai": ai_response})
             conversation["transcription"] += f"James: {ai_response}\n"
-            conversation["context"] = f"Previous conversation: {json.dumps(conversation['history'])}"
+            conversation["context"] = f"Previous conversation: {json.dumps(conversation['history'][-3:])}"  # Keep only last 3 exchanges
             call_state.conversations[call_sid] = conversation
             socketio.emit('transcription', {
                 'speaker': 'James',
@@ -275,12 +278,48 @@ def handle_call():
                 'timestamp': datetime.now().isoformat()
             })
     
-    # Step 3: Setup gather to listen for employer input after AI responds
     gather = Gather(input='speech', action='/handle_call', speechTimeout='auto')
     response.append(gather)
     
     return str(response)
 
+# NEW: WebSocket connection handlers
+@app.route('/ws-connect', methods=['POST'])
+def ws_connect():
+    stream_sid = request.json.get('stream_sid')
+    ws_type = request.json.get('type')
+    
+    if stream_sid:
+        ws_connections[stream_sid] = websockets.connect(
+            f"wss://voice.twilio.com/v1/Streams/{stream_sid}"
+        )
+        if ws_type == 'openai':
+            call_state.active_ws[stream_sid] = websockets.connect(
+                "wss://api.openai.com/v1/audio/speech"
+            )
+    
+    return jsonify({"status": "connected"})
+
+
+@socketio.on_error_default
+def default_error_handler(e):
+    print(f'SocketIO error: {str(e)}')
+    socketio.emit('error', {'message': 'An error occurred'}
+
+                  
+@app.route('/ws-disconnect', methods=['POST'])
+def ws_disconnect():
+    stream_sid = request.json.get('stream_sid')
+    
+    if stream_sid in ws_connections:
+        ws_connections[stream_sid].close()
+        del ws_connections[stream_sid]
+    
+    if stream_sid in call_state.active_ws:
+        call_state.active_ws[stream_sid].close()
+        del call_state.active_ws[stream_sid]
+    
+    return jsonify({"status": "disconnected"})
 
 @socketio.on('connect')
 def handle_connect():
