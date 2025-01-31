@@ -107,5 +107,35 @@ def process_response():
     
     return str(response)
 
+@app.route('/initiate_call', methods=['POST'])
+def initiate_call():
+    """Initiate a Twilio call"""
+    try:
+        # Allow phone number to be passed in, or use a default
+        phone_number = request.json.get('phone_number', '+447823656762')
+        
+        # Ensure phone number is in the correct format
+        if not phone_number.startswith('+'):
+            phone_number = f'+{phone_number}'
+        
+        call = twilio_client.calls.create(
+            url="https://evident-orly-onewebonly-4acd77ba.koyeb.app/start-call",
+            to="+447823656762",
+            from_="+18452864551",
+            record=True
+        )
+        
+        return jsonify({
+            "status": "success", 
+            "call_sid": call.sid,
+            "phone_number": phone_number
+        })
+    
+    except Exception as e:
+        return jsonify({
+            "status": "error", 
+            "message": str(e)
+        }), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
