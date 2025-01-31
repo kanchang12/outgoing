@@ -23,8 +23,13 @@ def place_call(phone_number):
     logging.debug(f"Placing call to phone number: {phone_number}")
     
     try:
-        # Initialize conversation without audio interface
-        conversation = Conversation(client, AGENT_ID)
+        # Set 'requires_auth' based on API_KEY, and no audio interface required
+        conversation = Conversation(
+            client, 
+            AGENT_ID, 
+            requires_auth=bool(API_KEY),  # True if API_KEY exists
+            audio_interface=None  # No audio interface needed
+        )
         
         # Start the conversation
         logging.debug(f"Starting conversation for phone number: {phone_number}")
