@@ -3,5 +3,6 @@ signalwire
 openai
 flask-socketio
 PyPDF2
-gunicorn
 
+eventlet==0.34.2
+gunicorn==21.2.0
