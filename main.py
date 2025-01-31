@@ -168,6 +168,24 @@ def handle_call():
     employer_response = request.values.get('SpeechResult')
     
     response = VoiceResponse()
+  
+    # Detect speech start and interrupt AI
+    if request.values.get('SpeechResult'):
+        print("Employer started speaking, interrupting AI...")
+    
+        # Clear Twilio's buffer
+        clear_twilio = {
+            "streamSid": request.values.get('StreamSid'),
+            "event": "clear"
+        }
+        await websocket.send_json(clear_twilio)
+    
+        # Cancel AI speech
+        interrupt_message = {"type": "response.cancel"}
+        await openai_ws.send(json.dumps(interrupt_message))
+    
+        print("AI speech canceled.")
+
     
     # Handle initial call
     if not employer_response:
@@ -218,7 +236,7 @@ def handle_call():
             })
     
     # Set up speech gathering
-    gather = Gather(input='speech', action='/handle_call')
+    gather = Gather(input='speech', action='/handle_call', speechTimeout='auto')
     response.append(gather)
     
     return str(response)
