@@ -3,7 +3,7 @@ from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from twilio.rest import Client as TwilioClient
 from openai import OpenAI
-from elevenlabs import voices, save, stream
+from elevenlabs import Voice, generate, stream
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -19,8 +19,14 @@ class AICallSystem:
         
         # Configuration
         self.twilio_number = os.getenv('TWILIO_PHONE_NUMBER')
-        self.elevenlabs_voice = voices()[0].voice_id  # Use first available voice
-
+        
+        # Get default voice ID - using Voice.from_api() to get available voices
+        try:
+            self.elevenlabs_voice = Voice.from_api()[0].voice_id
+        except Exception as e:
+            print(f"Warning: Could not fetch ElevenLabs voice: {e}")
+            self.elevenlabs_voice = "default"  # Use a default voice ID or handle this case appropriately
+            
         # System prompt for consistent AI behavior
         self.SYSTEM_PROMPT = """You are a helpful AI assistant conducting a phone conversation. 
         Respond naturally and concisely as if you're speaking on a phone call."""
@@ -38,29 +44,40 @@ class AICallSystem:
             )
             return response.choices[0].message.content
         except Exception as e:
+            print(f"Error generating AI response: {e}")
             return "I apologize, could you please repeat that."
 
     def text_to_speech(self, text):
         """Convert text to speech using ElevenLabs"""
-        audio = stream(
-            text=text,
-            voice=self.elevenlabs_voice
-        )
-        # Save audio locally
-        with open("response.mp3", "wb") as f:
-            f.write(audio.read())
-        return "response.mp3"
+        try:
+            audio = generate(
+                text=text,
+                voice=self.elevenlabs_voice,
+                stream=True
+            )
+            
+            # Save audio locally
+            filename = "response.mp3"
+            with open(filename, "wb") as f:
+                for chunk in audio:
+                    f.write(chunk)
+            return filename
+        except Exception as e:
+            print(f"Error generating speech: {e}")
+            return None
 
     def initiate_call(self, to_number):
         """Initiate Twilio call"""
-        call = self.twilio_client.calls.create(
-            to=to_number,
-            from_=self.twilio_number,
-            url='YOUR_TWILIO_WEBHOOK_URL'  # TwiML endpoint
-        )
-        return call.sid
-
-ai_system = AICallSystem()
+        try:
+            call = self.twilio_client.calls.create(
+                to=to_number,
+                from_=self.twilio_number,
+                url='YOUR_TWILIO_WEBHOOK_URL'  # TwiML endpoint
+            )
+            return call.sid
+        except Exception as e:
+            print(f"Error initiating call: {e}")
+            return None
 
 @app.route('/')
 def index():
@@ -69,18 +86,33 @@ def index():
 @app.route('/make_call', methods=['POST'])
 def make_call():
     phone_number = request.json.get('phone_number')
+    if not phone_number:
+        return jsonify({"status": "error", "message": "Phone number is required"}), 400
+    
     call_sid = ai_system.initiate_call(phone_number)
-    return jsonify({"status": "success", "call_sid": call_sid})
+    if call_sid:
+        return jsonify({"status": "success", "call_sid": call_sid})
+    return jsonify({"status": "error", "message": "Failed to initiate call"}), 500
 
 @socketio.on('user_input')
 def handle_user_input(data):
-    user_input = data['message']
+    user_input = data.get('message')
+    if not user_input:
+        emit('ai_response', {
+            'text': "No input received",
+            'audio_file': None
+        })
+        return
+    
     ai_response = ai_system.generate_ai_response(user_input)
     ai_speech_file = ai_system.text_to_speech(ai_response)
+    
     emit('ai_response', {
         'text': ai_response,
         'audio_file': ai_speech_file
     })
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
+    ai_system = AICallSystem()
+    port = int(os.environ.get('PORT', 8000))
+    socketio.run(app, host='0.0.0.0', port=port)
