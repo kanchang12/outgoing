@@ -64,7 +64,7 @@ parsed_resume = parse_resume(pdf_text)
 # Updated system prompt
 SYSTEM_PROMPT = """
 You are James, a professional HR consultant conducting a phone conversation about a candidate for an AI Developer (Freelance) position.
-
+Stop the moment speaker starts speaking. On any inturuption, stop talking
 Key Skills of the candidate:
 {skills}
 
@@ -212,47 +212,48 @@ def handle_call():
     """Handle incoming call webhook with improved flow"""
     call_sid = request.values.get('CallSid')
     employer_response = request.values.get('SpeechResult')  # Employer's speech response
-    stream_sid = request.values.get('StreamSid')  # Add this line
     
     response = VoiceResponse()
     
     # Step 1: Check if employer starts speaking
-    if employer_response and stream_sid:  # Modified condition
+    if employer_response:
         print("Employer started speaking, interrupting AI...")
-        
-        # Send clear command to Twilio
-        clear_twilio = {
-            "streamSid": stream_sid,
-            "event": "clear"
-        }
-        try:
-            # Send the clear command
-            socketio.emit('clear_speech', clear_twilio)
-            
-            # Send interrupt message
+
+        # Interrupt the AI's speech by sending a clear signal to stop it
+        if openai_ws is not None:
+            # Send a clear command to stop AI speech
+            clear_twilio = {
+                "streamSid": request.values.get('StreamSid'),
+                "event": "clear"  # Clear the speech stream for Twilio
+            }
+            openai_ws.send(json.dumps(clear_twilio))  # Sending the clear command
+
+            # Send interrupt message to OpenAI (Cancel AI's response)
             interrupt_message = {"type": "response.cancel"}
-            socketio.emit('cancel_response', interrupt_message)
+            openai_ws.send(json.dumps(interrupt_message))  # Cancel AI speech
             print("AI speech interrupted and stopped.")
-        except Exception as e:
-            print(f"Error during interrupt: {str(e)}")
     
-    # Rest of your existing handle_call code remains exactly the same
+    # Step 2: Handle initial or follow-up call
     if not employer_response:
+        # Initial message if there's no employer response yet
         initial_message = "Hello, this is James from HR Solutions. Is it a right time to talk?"
-        response.say(initial_message, voice='Polly.Brian', bargein=True)
+        response.say(initial_message, voice='Polly.Brian', bargein=True)  # Allow interruption
         
+        # Initialize conversation state if it doesn't exist
         call_state.conversations[call_sid] = {
             "context": "Initial call",
             "history": [{"ai": initial_message}],
             "transcription": f"James: {initial_message}\n"
         }
     else:
+        # Handling subsequent employer responses
         conversation = call_state.conversations.get(call_sid, {
             "context": "Initial call",
             "history": [],
             "transcription": ""
         })
         
+        # Log employer response
         conversation["transcription"] += f"Employer: {employer_response}\n"
         socketio.emit('transcription', {
             'speaker': 'Employer',
@@ -260,9 +261,10 @@ def handle_call():
             'timestamp': datetime.now().isoformat()
         })
         
+        # Get AI response after employer speaks
         ai_response = get_ai_response(conversation["context"], employer_response)
         if ai_response:
-            response.say(ai_response, voice='Polly.Brian', bargein=True)  # Enable bargein
+            response.say(ai_response, voice='Polly.Brian')
             conversation["history"].append({"employer": employer_response, "ai": ai_response})
             conversation["transcription"] += f"James: {ai_response}\n"
             conversation["context"] = f"Previous conversation: {json.dumps(conversation['history'])}"
@@ -273,6 +275,7 @@ def handle_call():
                 'timestamp': datetime.now().isoformat()
             })
     
+    # Step 3: Setup gather to listen for employer input after AI responds
     gather = Gather(input='speech', action='/handle_call', speechTimeout='auto')
     response.append(gather)
     
