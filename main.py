@@ -57,7 +57,7 @@ class AICallSystem:
             call = self.twilio_client.calls.create(
                 to=to_number,
                 from_=self.twilio_number,
-                url=f"{os.getenv('BASE_URL', 'https://your-domain.com')}/webhook"
+                url=os.getenv('TWILIO_WEBHOOK_URL')
             )
             return call.sid
         except Exception as e:
