@@ -10,6 +10,8 @@ import json
 from datetime import datetime
 import os
 
+openai_ws = None  # Initialize globally (or replace this with actual WebSocket setup logic)
+
 # Initialize Flask and SocketIO with proper configuration
 app = Flask(__name__)
 Payload.max_decode_packets = 50
@@ -168,39 +170,36 @@ def handle_call():
     employer_response = request.values.get('SpeechResult')
     
     response = VoiceResponse()
-  
-    # Detect speech start and interrupt AI
-    if request.values.get('SpeechResult'):
+    
+    # If employer starts speaking, interrupt the AI's speech
+    if employer_response:
         print("Employer started speaking, interrupting AI...")
-    
-        # Clear Twilio's buffer
-        clear_twilio = {
-            "streamSid": request.values.get('StreamSid'),
-            "event": "clear"
-        }
-        await websocket.send_json(clear_twilio)
-    
-        # Cancel AI speech
-        interrupt_message = {"type": "response.cancel"}
-        await openai_ws.send(json.dumps(interrupt_message))
-    
-        print("AI speech canceled.")
+        
+        # Ensure WebSocket is initialized
+        if openai_ws is not None:
+            # Clear Twilio's buffer (clear the stream)
+            clear_twilio = {
+                "streamSid": request.values.get('StreamSid'),
+                "event": "clear"
+            }
+            openai_ws.send(json.dumps(clear_twilio))  # Send clear command to Twilio
 
+            # Send interrupt message to OpenAI (to cancel AI's speech)
+            interrupt_message = {"type": "response.cancel"}
+            openai_ws.send(json.dumps(interrupt_message))  # Interrupt AI response
+            print("AI speech canceled.")
     
     # Handle initial call
     if not employer_response:
-        initial_message = (
-            "Hello, this is James from HR Solutions. Is it a right time to talk?"
-        )
+        initial_message = "Hello, this is James from HR Solutions. Is it a right time to talk?"
         response.say(initial_message, voice='Polly.Brian', bargein=True)
         
         # Initialize conversation state if not exists
-        if call_sid not in call_state.conversations:
-            call_state.conversations[call_sid] = {
-                "context": "Initial call",
-                "history": [{"ai": initial_message}],
-                "transcription": f"James: {initial_message}\n"
-            }
+        call_state.conversations[call_sid] = {
+            "context": "Initial call",
+            "history": [{"ai": initial_message}],
+            "transcription": f"James: {initial_message}\n"
+        }
     else:
         # Handle subsequent interactions
         conversation = call_state.conversations.get(call_sid, {
@@ -217,25 +216,21 @@ def handle_call():
             'timestamp': datetime.now().isoformat()
         })
         
-        # Get and handle AI response
+        # Get AI response
         ai_response = get_ai_response(conversation["context"], employer_response)
         if ai_response:
             response.say(ai_response, voice='Polly.Brian')
-            conversation["history"].append({
-                "employer": employer_response,
-                "ai": ai_response
-            })
+            conversation["history"].append({"employer": employer_response, "ai": ai_response})
             conversation["transcription"] += f"James: {ai_response}\n"
             conversation["context"] = f"Previous conversation: {json.dumps(conversation['history'])}"
             call_state.conversations[call_sid] = conversation
-            
             socketio.emit('transcription', {
                 'speaker': 'James',
                 'text': ai_response,
                 'timestamp': datetime.now().isoformat()
             })
     
-    # Set up speech gathering
+    # Set up speech gathering (to continue gathering employer's input)
     gather = Gather(input='speech', action='/handle_call', speechTimeout='auto')
     response.append(gather)
     
