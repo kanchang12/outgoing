@@ -69,45 +69,21 @@ class MediaStreamHandler:
         except Exception as e:
             print(f"Media stream handling error: {e}")
 
-@app.route('/start_call', methods=['POST'])
-def start_call():
-    """Initiate a call with media streaming"""
-    try:
-        phone_number = request.json.get('phone_number')
-        
-        call = twilio_client.calls.create(
-            url="https://evident-orly-onewebonly-4acd77ba.koyeb.app/start-call",
-            to=+447823656762,
-            from_=+18452864551,
-            record=True
-        )
-        
-        return jsonify({
-            "status": "success", 
-            "call_sid": call.sid
-        })
-    
-    except Exception as e:
-        return jsonify({
-            "status": "error", 
-            "message": str(e)
-        }), 500
-
-@app.route('/handle_call', methods=['POST'])
-def handle_call():
-    """Handle incoming call webhook"""
+@app.route('/start-call', methods=['POST', 'GET'])
+def start_call_webhook():
+    """Handle incoming Twilio call webhook"""
     response = VoiceResponse()
     
     # Initial greeting
     response.say("Hello, this is James from HR Solutions", voice='Polly.Brian')
     
     # Gather for speech input
-    gather = Gather(input='speech', action='/process_response', speechTimeout='auto')
+    gather = Gather(input='speech', action='/process-response', speechTimeout='auto')
     response.append(gather)
     
     return str(response)
 
-@app.route('/process_response', methods=['POST'])
+@app.route('/process-response', methods=['POST'])
 def process_response():
     """Process employer's speech response"""
     employer_response = request.values.get('SpeechResult')
@@ -126,7 +102,7 @@ def process_response():
     response.say(ai_response, voice='Polly.Brian')
     
     # Set up next gather for continued conversation
-    gather = Gather(input='speech', action='/process_response', speechTimeout='auto')
+    gather = Gather(input='speech', action='/process-response', speechTimeout='auto')
     response.append(gather)
     
     return str(response)
