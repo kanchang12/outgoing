@@ -61,7 +61,7 @@ parsed_resume = parse_resume(pdf_text)
 
 # Updated system prompt
 SYSTEM_PROMPT = """
-You are James, a professional HR consultant discussing a candidate for an AI Developer (Freelance) position. 
+You are James, a professional HR consultant discussing a candidate for an AI Developer (Freelance) position. Stop immediately if the user interuppts!!! Talk immidiatelt if user stops for less than 1 second
 The candidate's profile:
 
 Key Skills:
@@ -218,7 +218,7 @@ def handle_call():
             })
     
     # Set up speech gathering
-    gather = Gather(input='speech', timeout=1, action='/handle_call')
+    gather = Gather(input='speech', action='/handle_call')
     response.append(gather)
     
     return str(response)
