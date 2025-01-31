@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Conversation Call</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div class="container mx-auto p-4">
+        <input type="tel" id="phoneInput" placeholder="Enter Phone Number" 
+               class="border p-2 w-full mb-4">
+        <button onclick="initiateCall()" 
+                class="bg-blue-500 text-white p-2 rounded">
+            Start AI Call
+        </button>
+    </div>
+
+    <script>
+        const socket = io('/', {
+            transports: ['websocket']
+        });
+        
+        function initiateCall() {
+            const phoneNumber = document.getElementById('phoneInput').value;
+            
+            fetch('/make_call', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({phone_number: phoneNumber})
+            });
+        }
+
+        socket.on('ai_response', (data) => {
+            console.log(data.text);
+            const audio = new Audio(data.audio_file);
+            audio.play();
+        });
+    </script>
+</body>
+</html>
