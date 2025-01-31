@@ -1,13 +1,13 @@
 import os
 import json
 import asyncio
-from fastapi import FastAPI
-from twilio.rest import Client
+import base64
+import websockets
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import JSONResponse
-from fastapi import BackgroundTasks
-import uvicorn
+from twilio.rest import Client
 from dotenv import load_dotenv
-from openai import OpenAI
+import uvicorn
 
 # Load environment variables
 load_dotenv()
@@ -16,72 +16,76 @@ load_dotenv()
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 PHONE_NUMBER_FROM = os.getenv("PHONE_NUMBER_FROM")  # Your Twilio phone number
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# OpenAI credentials and client
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Twilio & OpenAI Clients
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 # FastAPI app instance
 app = FastAPI()
 
-# Twilio Client
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+# Twilio Call Config
+CALL_NUMBER_FROM = "+18452864551"
+CALL_NUMBER_TO = "+447823656762"
 
-# This will be used to start the call
-CALL_NUMBER_FROM = '+18452864551'  # The calling number
-CALL_NUMBER_TO = '+447823656762'  # The target number you want to call
-
-@app.get('/')
+@app.get("/")
 async def index():
     return {"message": "Welcome to the Twilio AI Assistant"}
 
-# This endpoint triggers the outbound call
-@app.get('/start-call')
-async def start_call(background_tasks: BackgroundTasks):
+@app.websocket("/media-stream")
+async def media_stream(websocket: WebSocket):
+    """Handle WebSocket connection with Twilio and OpenAI for live conversation."""
+    print("Client connected")
+    await websocket.accept()
+
+    async with websockets.connect(
+        "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
+        extra_headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "OpenAI-Beta": "realtime=v1"}
+    ) as openai_ws:
+
+        async def receive_audio_from_twilio():
+            """Receive and forward Twilio's audio stream to OpenAI."""
+            try:
+                async for message in websocket.iter_text():
+                    data = json.loads(message)
+                    if data.get("event") == "media":
+                        audio_data = data["media"]["payload"]
+                        await openai_ws.send(json.dumps({"type": "input_audio_buffer.append", "audio": audio_data}))
+            except Exception as e:
+                print(f"Error receiving from Twilio: {e}")
+
+        async def send_audio_to_twilio():
+            """Receive OpenAI's response and send audio back to Twilio."""
+            try:
+                async for response in openai_ws:
+                    data = json.loads(response)
+                    if data.get("type") == "response.audio.delta":
+                        audio_payload = base64.b64encode(base64.b64decode(data["delta"])).decode("utf-8")
+                        await websocket.send_json({"event": "media", "streamSid": "12345", "media": {"payload": audio_payload}})
+            except Exception as e:
+                print(f"Error sending to Twilio: {e}")
+
+        # Run both send and receive tasks concurrently
+        await asyncio.gather(receive_audio_from_twilio(), send_audio_to_twilio())
+
+@app.get("/start-call")
+async def start_call():
+    """Initiate a call and connect it to the WebSocket."""
     try:
-        # Creating the Twilio outbound call
         call = twilio_client.calls.create(
             to=CALL_NUMBER_TO,
             from_=CALL_NUMBER_FROM,
-            twiml='<Response><Say>Hi! This is a marketing call from our team. We have exciting offers for you!</Say><Pause length="2"/><Say>For more information, visit our website or contact our support team.</Say></Response>'
+            twiml=f"""<?xml version="1.0" encoding="UTF-8"?>
+                <Response>
+                    <Connect>
+                        <Stream url="wss://evident-orly-onewebonly-4acd77ba.koyeb.app/media-stream"/>
+                    </Connect>
+                </Response>"""
         )
-
-        background_tasks.add_task(log_call_sid, call.sid)
-        return JSONResponse(content={"message": "Call is being initiated!", "call_sid": call.sid}, status_code=200)
-    
+        return JSONResponse(content={"message": "Call initiated!", "call_sid": call.sid}, status_code=200)
     except Exception as e:
-        return JSONResponse(content={"message": f"Error initiating call: {str(e)}"}, status_code=500)
-
-# Log the call SID for reference
-async def log_call_sid(call_sid: str):
-    print(f"Call initiated with SID: {call_sid}")
-
-# OpenAI conversation (current API format with gpt-4-turbo)
-@app.post('/generate-response')
-async def generate_response(user_input: str):
-    try:
-        formatted_prompt = "You are a marketing assistant providing product offers."
-        
-        # Send the prompt to OpenAI's GPT-4 Turbo API
-        response = openai_client.chat.completions.create(
-            model="gpt-4-turbo-preview",
-            messages=[
-                {"role": "system", "content": formatted_prompt},
-                {"role": "user", "content": user_input}
-            ],
-            max_tokens=150,
-            temperature=0.7
-        )
-        
-        # Extract response text
-        assistant_reply = response['choices'][0]['message']['content']
-        return JSONResponse(content={"message": assistant_reply}, status_code=200)
-    
-    except Exception as e:
-        return JSONResponse(content={"message": f"Error generating response: {str(e)}"}, status_code=500)
-
-import os
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))  # Use the port Koyeb provides
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
