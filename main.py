@@ -100,7 +100,8 @@ def get_ai_response(context, employer_response):
         )
         
         return response.choices[0].message.content
-    except Exception as e
+    except Exception as e:
+        return "Would you like to know about their AI development experience?"
 
 @app.route('/')
 def index():
