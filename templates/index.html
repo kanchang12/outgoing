@@ -1,200 +1,32 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HR Call Management</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        .container {
-            background: #f5f5f5;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .input-group {
-            margin-bottom: 20px;
-        }
-        input[type="tel"] {
-            width: 100%;
-            padding: 10px;
-            margin: 5px 0;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            background: #0066cc;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:disabled {
-            background: #cccccc;
-        }
-        #transcription {
-            margin-top: 20px;
-            padding: 15px;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            height: 300px;
-            overflow-y: auto;
-        }
-        .status {
-            margin-top: 10px;
-            padding: 10px;
-            border-radius: 4px;
-        }
-        .status.active {
-            background: #e8f5e9;
-            color: #2e7d32;
-        }
-        .status.error {
-            background: #ffebee;
-            color: #c62828;
-        }
-        .call-controls {
-            display: none;
-            margin-top: 20px;
-        }
-        .call-controls.visible {
-            display: block;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Make a Call</title>
 </head>
 <body>
-    <div class="container">
-        <h1>AI Developer Position - Call Management</h1>
-        
-        <div class="input-group">
-            <label for="phone">Enter Phone Number:</label>
-            <input type="tel" id="phone" placeholder="+1234567890" required>
-        </div>
+  <h1>Place a Call</h1>
+  <label for="phoneNumber">Phone Number:</label>
+  <input type="text" id="phoneNumber" placeholder="Enter phone number">
+  <button id="callButton">Place Call</button>
 
-        <button id="startCall">Start Call</button>
-        
-        <div class="call-controls" id="callControls">
-            <button id="endCall" disabled>End Call</button>
-            <button id="downloadTranscript" disabled>Download Transcript</button>
-        </div>
-
-        <div id="status" class="status"></div>
-
-        <div id="transcription">
-            <h3>Live Transcription</h3>
-            <div id="transcriptionText"></div>
-        </div>
-    </div>
-
-    <script>
-        const socket = io();
-        const startCallBtn = document.getElementById('startCall');
-        const endCallBtn = document.getElementById('endCall');
-        const downloadBtn = document.getElementById('downloadTranscript');
-        const phoneInput = document.getElementById('phone');
-        const statusDiv = document.getElementById('status');
-        const transcriptionDiv = document.getElementById('transcriptionText');
-        const callControls = document.getElementById('callControls');
-
-        let currentCallSid = null;
-        let transcriptText = '';
-
-        startCallBtn.addEventListener('click', async () => {
-            const phoneNumber = phoneInput.value;
-            if (!phoneNumber) {
-                setStatus('Please enter a valid phone number', 'error');
-                return;
-            }
-
-            try {
-                startCallBtn.disabled = true;
-                const response = await fetch('/call', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ phone_number: phoneNumber })
-                });
-                
-                const data = await response.json();
-                if (data.status === 'success') {
-                    currentCallSid = data.call_sid;
-                    setStatus('Call initiated. Recording in progress...', 'active');
-                    endCallBtn.disabled = false;
-                    callControls.classList.add('visible');
-                } else {
-                    throw new Error(data.message);
-                }
-            } catch (error) {
-                setStatus(`Error: ${error.message}`, 'error');
-                startCallBtn.disabled = false;
-            }
-        });
-
-        endCallBtn.addEventListener('click', async () => {
-            if (currentCallSid) {
-                try {
-                    const response = await fetch('/end-call', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ call_sid: currentCallSid })
-                    });
-                    
-                    const data = await response.json();
-                    if (data.status === 'success') {
-                        setStatus('Call ended successfully', 'active');
-                        downloadBtn.disabled = false;
-                        endCallBtn.disabled = true;
-                    }
-                } catch (error) {
-                    setStatus(`Error ending call: ${error.message}`, 'error');
-                }
-            }
-        });
-
-        downloadBtn.addEventListener('click', async () => {
-            try {
-                const response = await fetch(`/download-transcript/${currentCallSid}`);
-                const data = await response.json();
-                if (data.status === 'success') {
-                    const blob = new Blob([data.transcript], { type: 'text/plain' });
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `call_transcript_${currentCallSid}.txt`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    window.URL.revokeObjectURL(url);
-                }
-            } catch (error) {
-                setStatus(`Error downloading transcript: ${error.message}`, 'error');
-            }
-        });
-
-        socket.on('transcription', (data) => {
-            const newTranscription = document.createElement('p');
-            newTranscription.textContent = `${data.speaker}: ${data.text}`;
-            transcriptionDiv.appendChild(newTranscription);
-            transcriptionDiv.scrollTop = transcriptionDiv.scrollHeight;
-            transcriptText += `${data.speaker}: ${data.text}\n`;
-        });
-
-        function setStatus(message, type) {
-            statusDiv.textContent = message;
-            statusDiv.className = `status ${type}`;
-        }
-    </script>
+  <script>
+    document.getElementById("callButton").addEventListener("click", function() {
+      const phoneNumber = document.getElementById("phoneNumber").value;
+      fetch("/call", {
+        method: "POST",
+        body: JSON.stringify({ phoneNumber: phoneNumber }),
+        headers: { "Content-Type": "application/json" }
+      })
+      .then(response => response.json())
+      .then(data => {
+        alert(data.message);
+      })
+      .catch(error => {
+        alert("Error placing the call");
+      });
+    });
+  </script>
 </body>
 </html>
