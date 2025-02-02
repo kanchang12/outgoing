@@ -136,7 +136,7 @@ def webhook():
             speech_timeout='auto',
             interrupt='true'
         )
-        gather.say("Hello! How can I help you today?")
+        gather.say("Hello! this is Emma calling. Can we chat for a bit about the social media channels?")
         response.append(gather)
     
     # Add a redirect to handle no input
